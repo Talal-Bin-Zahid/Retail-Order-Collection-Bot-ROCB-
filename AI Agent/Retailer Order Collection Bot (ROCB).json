@@ -1,0 +1,945 @@
+{
+  "name": "Retailer Order Collection Bot (ROCB)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rocb-order",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "4c0ed2ea-ca9e-4ad7-8161-a4407e0d0d39",
+      "name": "Order Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        512
+      ],
+      "webhookId": "829c3b55-f960-4e54-bd83-edd618f0ea5b"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an FMCG Order Intelligence Agent for a Pakistani distributor.\n\n**YOUR RESPONSIBILITIES:**\n1. Validate incoming retailer orders\n2. Detect duplicates\n3. Enrich order data using SKU database\n4. Analyze orders for anomalies and upsell opportunities\n5. Trigger correct business actions (warehouse, retailer, manager)\n6. Maintain logs and system memory\n\n**INCOMING ORDER DATA:**\n{{ JSON.stringify($json.body, null, 2) }}\n\n**PROCESSING STEPS:**\n\n**Step 1 - Clean & Structure:**\n- Normalize all fields\n- Generate Order ID: ORD-{{ $now.toFormat(\"yyyyMMdd\") }}-XXXX (use random 4 digits)\n- Build valid lineItems[] array (only include SKUs where qty > 0)\n- Extract: rep_name, territory, retailer_name, retailer_phone, payment_terms, special_instructions\n\n**Step 2 - Validation Rules:**\nUse \"Read SKU Config\" tool to get SKU database.\nReject order if:\n- Missing rep_name, retailer_name, or retailer_phone\n- Phone not matching pattern /^03\\d{9}$/\n- No valid line items (qty > 0)\n- Any SKU does not exist in database\n- Any SKU has Active = NO\n- Any quantity < Min_Order_Qty for that SKU\n\nIf validation fails:\n- Use \"Append Error Log\" tool with: timestamp, order_id, error_type, error_message\n- Use \"Send Manager Alert\" tool to notify area manager\n- STOP processing and return error status\n\n**Step 3 - Duplicate Detection:**\nUse \"Read Recent Orders\" tool to check orders from last 2 hours.\nMatch: same rep_name + retailer_name\nIf duplicate found:\n- Use \"Append System Log\" tool with status: DUPLICATE_BLOCKED\n- STOP processing\n\n**Step 4 - Enrichment:**\nFor each SKU in lineItems:\n- Add: sku_name, category, unit_price, related_sku from SKU Config\n- Calculate: line_total = qty × unit_price\n- Calculate: total_order_value = sum of all line_totals\n\n**Step 5 - AI Intelligence Analysis:**\nAnalyze the enriched order and classify:\n- ANOMALY: unusually high quantity (≥3× typical order size for this retailer/territory)\n- UPSELL_OPP: missing related SKU that is commonly ordered together\n- NORMAL: no issues detected\n\nReturn your analysis in the structured output format.\n\n**Step 6 - Save & Notify:**\nIf order is valid and not duplicate:\n- Use \"Append Master Order\" tool with: order_id, timestamp, rep_name, territory, retailer_name, retailer_phone, lineItems (as JSON string), total_order_value, payment_terms, special_instructions, ai_flag, ai_note, status=PENDING\n- Use \"Send Warehouse Email\" tool with packing list format\n- If retailer has email, use \"Send Retailer Email\" tool for confirmation\n- If ai_flag ≠ NORMAL, use \"Send Manager Alert\" tool\n- Use \"Append System Log\" tool with: timestamp, order_id, status=SUCCESS\n\n**TOOLS AVAILABLE:**\n- Read SKU Config: Get SKU database\n- Read Recent Orders: Check for duplicates\n- Append Master Order: Save validated order\n- Append System Log: Log execution\n- Append Error Log: Log errors\n- Send Warehouse Email: Notify warehouse\n- Send Retailer Email: Confirm to retailer\n- Send Manager Alert: Alert manager\n\n**ERROR HANDLING:**\n- Validation failure → stop + log + notify\n- Duplicate → stop + log\n- AI analysis failure → continue without blocking (set flag=AI_UNAVAILABLE)\n- Gmail failure → log but do not stop\n- Sheets failure → log and stop safely\n\nProcess this order autonomously using the tools. Always produce structured outputs and prioritize business safety over completion.",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "You are an FMCG Order Intelligence Agent. You must validate orders, detect duplicates, enrich data, analyze for anomalies, and trigger business actions autonomously using the provided tools. Never hallucinate SKUs. Always use tools to read/write data. Prioritize business safety.",
+          "maxIterations": 20,
+          "returnIntermediateSteps": true
+        }
+      },
+      "id": "46fed258-1702-4986-a71b-75010facf9e3",
+      "name": "FMCG Order Intelligence Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        976,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "id": "a2b07244-d5b9-4889-bc5e-a54e50b94ff4",
+      "name": "OpenAI Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        464,
+        624
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "bzf5GDKAqkuNiuCb",
+          "name": "n8n free OpenAI API credits"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1a1tZLx7CybBCskRWcAev--lDpPpBp1su5bpND3lEWvE/edit?usp=sharing",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1772374472,
+          "mode": "list",
+          "cachedResultName": "SKU Config",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1a1tZLx7CybBCskRWcAev--lDpPpBp1su5bpND3lEWvE/edit#gid=1772374472"
+        },
+        "options": {}
+      },
+      "id": "ab26d6b8-d17a-4ee1-aea1-a777872ddbeb",
+      "name": "Read SKU Config",
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        592,
+        624
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "e6WYGp0FpcuPYBkh",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1a1tZLx7CybBCskRWcAev--lDpPpBp1su5bpND3lEWvE/edit?usp=sharing",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1927600540,
+          "mode": "list",
+          "cachedResultName": "Master Orders",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1a1tZLx7CybBCskRWcAev--lDpPpBp1su5bpND3lEWvE/edit#gid=1927600540"
+        },
+        "options": {}
+      },
+      "id": "db528259-acb3-41ae-8358-dfb3f310b418",
+      "name": "Read Recent Orders",
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        720,
+        624
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "e6WYGp0FpcuPYBkh",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1a1tZLx7CybBCskRWcAev--lDpPpBp1su5bpND3lEWvE/edit?usp=sharing",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1927600540,
+          "mode": "list",
+          "cachedResultName": "Master Orders",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1a1tZLx7CybBCskRWcAev--lDpPpBp1su5bpND3lEWvE/edit#gid=1927600540"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Order_ID",
+              "displayName": "Order_ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Submission_Timestamp",
+              "displayName": "Submission_Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Rep_Name",
+              "displayName": "Rep_Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Territory",
+              "displayName": "Territory",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Retailer_Name",
+              "displayName": "Retailer_Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Retailer_Phone",
+              "displayName": "Retailer_Phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "SKU_1_Code",
+              "displayName": "SKU_1_Code",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "SKU_1_Qty",
+              "displayName": "SKU_1_Qty",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "SKU_2_Code",
+              "displayName": "SKU_2_Code",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "SKU_2_Qty",
+              "displayName": "SKU_2_Qty",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "SKU_3_Code",
+              "displayName": "SKU_3_Code",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "SKU_3_Qty",
+              "displayName": "SKU_3_Qty",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Total_Order_Value_PKR",
+              "displayName": "Total_Order_Value_PKR",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Payment_Terms",
+              "displayName": "Payment_Terms",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Special_Instructions",
+              "displayName": "Special_Instructions",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Order_Status",
+              "displayName": "Order_Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "AI_Flag",
+              "displayName": "AI_Flag",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "AI_Note",
+              "displayName": "AI_Note",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "dfe92b89-5e7e-4108-8b3a-bb2d06dc4a0e",
+      "name": "Append Master Order",
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        848,
+        624
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "e6WYGp0FpcuPYBkh",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1a1tZLx7CybBCskRWcAev--lDpPpBp1su5bpND3lEWvE/edit?usp=sharing",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 716294118,
+          "mode": "list",
+          "cachedResultName": "System Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1a1tZLx7CybBCskRWcAev--lDpPpBp1su5bpND3lEWvE/edit#gid=716294118"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Log_Timestamp",
+              "displayName": "Log_Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Order_ID",
+              "displayName": "Order_ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Rep_Name",
+              "displayName": "Rep_Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Event_Type",
+              "displayName": "Event_Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Detail",
+              "displayName": "Detail",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "7c3e634f-6441-4d48-ac16-c1ce216126e8",
+      "name": "Append System Log",
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        976,
+        624
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "e6WYGp0FpcuPYBkh",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1a1tZLx7CybBCskRWcAev--lDpPpBp1su5bpND3lEWvE/edit?usp=sharing",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1007304692,
+          "mode": "list",
+          "cachedResultName": "Error Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1a1tZLx7CybBCskRWcAev--lDpPpBp1su5bpND3lEWvE/edit#gid=1007304692"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Error_Timestamp",
+              "displayName": "Error_Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Rep_Name",
+              "displayName": "Rep_Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Raw_Data",
+              "displayName": "Raw_Data",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Error_Type",
+              "displayName": "Error_Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Error_Detail",
+              "displayName": "Error_Detail",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Resolved",
+              "displayName": "Resolved",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "95a48bd1-6dc7-455b-a905-a351b280d5b8",
+      "name": "Append Error Log",
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        1104,
+        624
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "e6WYGp0FpcuPYBkh",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "<__PLACEHOLDER_VALUE__warehouse@company.com__>",
+        "subject": "New Order - Packing List",
+        "message": "<__PLACEHOLDER_VALUE__Order details with packing list__>",
+        "options": {}
+      },
+      "id": "b46e0a13-1523-476c-8cfd-9f9f348f987a",
+      "name": "Send Warehouse Email",
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.2,
+      "position": [
+        1232,
+        624
+      ],
+      "webhookId": "18c2205f-43c6-4f60-9f9b-2fa7a7280867",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "vjVubJpkB61iQkrs",
+          "name": "Gmail OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "<__PLACEHOLDER_VALUE__retailer@example.com__>",
+        "subject": "Order Confirmation",
+        "message": "<__PLACEHOLDER_VALUE__Thank you for your order__>",
+        "options": {}
+      },
+      "id": "20ad7e29-30a3-4b7a-94df-88c48e4c20be",
+      "name": "Send Retailer Email",
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.2,
+      "position": [
+        1360,
+        624
+      ],
+      "webhookId": "e122be36-eee9-4bf5-8f9e-d844b7fb5117",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "vjVubJpkB61iQkrs",
+          "name": "Gmail OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "<__PLACEHOLDER_VALUE__manager@company.com__>",
+        "subject": "Order Alert - Requires Attention",
+        "message": "<__PLACEHOLDER_VALUE__Order flagged for review__>",
+        "options": {}
+      },
+      "id": "218296ff-fc57-433f-b822-4c9251af6703",
+      "name": "Send Manager Alert",
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.2,
+      "position": [
+        1488,
+        624
+      ],
+      "webhookId": "ed436240-e921-4ab9-9ca5-354fd81860e1",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "vjVubJpkB61iQkrs",
+          "name": "Gmail OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": {
+          "flag": "NORMAL",
+          "note": "Order looks standard",
+          "anomalyDetail": null,
+          "upsellSuggestion": null
+        }
+      },
+      "id": "9a480455-c3f4-4c7d-ba33-3f8485f91a43",
+      "name": "AI Analysis Output",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1616,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"status\": \"success\", \"message\": \"Order processed\", \"analysis\": $json.output } }}",
+        "options": {}
+      },
+      "id": "09a9b596-c13d-42e5-ac5e-e923525c1d07",
+      "name": "Send Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1888,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 18
+            }
+          ]
+        }
+      },
+      "id": "a742fd1d-7650-4749-9495-cfcbf253171e",
+      "name": "Daily Report at 6 PM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        240,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/1a1tZLx7CybBCskRWcAev--lDpPpBp1su5bpND3lEWvE/edit?usp=sharing",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1927600540,
+          "mode": "list",
+          "cachedResultName": "Master Orders",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1a1tZLx7CybBCskRWcAev--lDpPpBp1su5bpND3lEWvE/edit#gid=1927600540"
+        },
+        "options": {}
+      },
+      "id": "0635c9f9-3b31-4bcc-9fb7-b97e490782fc",
+      "name": "Fetch Daily Orders",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1040,
+        800
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "e6WYGp0FpcuPYBkh",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a Daily Intelligence Analyst for an FMCG distributor.\n\n**TODAY'S ORDERS DATA:**\n{{ JSON.stringify($json, null, 2) }}\n\n**YOUR TASK:**\nAnalyze all orders from today ({{ $now.toFormat(\"yyyy-MM-dd\") }}) and generate a comprehensive daily intelligence report.\n\n**ANALYSIS REQUIRED:**\n1. **Total Volume vs Yesterday:** Calculate total order value and compare to previous day\n2. **Top 3 Reps:** Identify top 3 sales reps by total order value\n3. **Top Products:** Identify top 5 SKUs by quantity ordered\n4. **Weak Territories:** Identify territories with below-average performance\n5. **Strategic Insights:** Provide 3-5 actionable insights based on patterns, anomalies, and trends\n\n**OUTPUT FORMAT:**\nGenerate a professional HTML email report with:\n- Executive Summary\n- Key Metrics (total orders, total value, average order size)\n- Performance Rankings (reps, products, territories)\n- Strategic Recommendations\n- Alerts (if any anomalies detected)\n\nMake the report actionable and business-focused.",
+        "options": {
+          "systemMessage": "You are a business intelligence analyst. Generate comprehensive, actionable daily reports for FMCG distribution management.",
+          "maxIterations": 10
+        }
+      },
+      "id": "fd34cf87-8256-495f-9261-ddc00c2ca714",
+      "name": "Daily Intelligence Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1600,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "<__PLACEHOLDER_VALUE__gm@company.com__>",
+        "subject": "=Daily Intelligence Report - {{ $now.toFormat(\"MMMM d, yyyy\") }}",
+        "message": "={{ $json.output }}",
+        "options": {}
+      },
+      "id": "0305f9ad-c325-4280-a6c5-566ff2b2db94",
+      "name": "Send Daily Report to GM",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1952,
+        800
+      ],
+      "webhookId": "182f77cb-d853-4edb-a128-4ca31cd07e05",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "vjVubJpkB61iQkrs",
+          "name": "Gmail OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 📥 Order Processing Flow\n\n**Webhook receives order** → **AI Agent validates, enriches, analyzes** → **Response sent**\n\nThe agent autonomously:\n- Validates all fields and SKUs\n- Detects duplicates (2-hour window)\n- Enriches with SKU data\n- Analyzes for anomalies/upsells\n- Saves to Master Orders\n- Notifies warehouse, retailer, manager\n- Logs all actions",
+        "height": 200,
+        "width": 1000,
+        "color": 2
+      },
+      "id": "79a83ed9-5e44-45e7-90ff-815d1c514a85",
+      "name": "Sticky Note 4eb58ad8",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1600,
+        1392
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 📊 Daily Intelligence Report\n\n**Runs at 6 PM daily**\n\nAnalyzes all orders and generates:\n- Volume trends\n- Top performers\n- Weak territories\n- Strategic insights\n\nSent to GM via email",
+        "height": 200,
+        "width": 1200,
+        "color": 4
+      },
+      "id": "dabec7f4-8151-4d8d-8f6b-f6cbca10f587",
+      "name": "Sticky Note 8eddf937",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        192,
+        1360
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## ⚙️ Configuration Required\n\n**Google Sheets Structure:**\n- SKU_Config: sku_code, sku_name, category, unit_price, min_order_qty, active, related_sku\n- Master_Orders: order_id, timestamp, rep_name, territory, retailer_name, retailer_phone, lineItems, total_order_value, payment_terms, special_instructions, ai_flag, ai_note, status\n- System_Log: timestamp, order_id, status, message\n- Error_Log: timestamp, order_id, error_type, error_message\n\n**Credentials:**\n- OpenAI API\n- Google Sheets OAuth2\n- Gmail OAuth2",
+        "color": 5
+      },
+      "id": "0f08e966-0274-48eb-8729-28a39e74f0f5",
+      "name": "Sticky Note 5943d417",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1328,
+        1360
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Order Webhook": {
+      "main": [
+        [
+          {
+            "node": "FMCG Order Intelligence Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FMCG Order Intelligence Agent": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "FMCG Order Intelligence Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Daily Intelligence Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read SKU Config": {
+      "ai_tool": [
+        [
+          {
+            "node": "FMCG Order Intelligence Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Recent Orders": {
+      "ai_tool": [
+        [
+          {
+            "node": "FMCG Order Intelligence Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Master Order": {
+      "ai_tool": [
+        [
+          {
+            "node": "FMCG Order Intelligence Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append System Log": {
+      "ai_tool": [
+        [
+          {
+            "node": "FMCG Order Intelligence Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Error Log": {
+      "ai_tool": [
+        [
+          {
+            "node": "FMCG Order Intelligence Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Warehouse Email": {
+      "ai_tool": [
+        [
+          {
+            "node": "FMCG Order Intelligence Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Retailer Email": {
+      "ai_tool": [
+        [
+          {
+            "node": "FMCG Order Intelligence Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Manager Alert": {
+      "ai_tool": [
+        [
+          {
+            "node": "FMCG Order Intelligence Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Analysis Output": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "FMCG Order Intelligence Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Report at 6 PM": {
+      "main": [
+        [
+          {
+            "node": "Fetch Daily Orders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Daily Orders": {
+      "main": [
+        [
+          {
+            "node": "Daily Intelligence Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Intelligence Agent": {
+      "main": [
+        [
+          {
+            "node": "Send Daily Report to GM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "ddf7a955-bd3e-4694-a429-38520741db75",
+  "meta": {
+    "instanceId": "0954e7d5ae1fe114d9dd08e0a2d354efb8a3e087c3746f841912f6b345cb7e20"
+  },
+  "id": "FWh1lAYNifeuvWkS",
+  "tags": []
+}
